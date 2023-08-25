@@ -22,7 +22,7 @@ class LineZone:
 
         """
         self.vector = Vector(start=start, end=end)
-        self.tracker_state: Dict[str, bool] = {}
+        self.tracker_state: Dict[str, (bool, bool)] = {}  # 1 флаг - внутри или снаружи, второй - сменил состояние
         self.in_count: int = 0
         self.out_count: int = 0
 
@@ -33,41 +33,31 @@ class LineZone:
             human_bbox: словарь из tracker_id: [xyxy, True/False], где True/False - тречится или уже нет
         """
         for tracker_id, bbox in human_bbox.items():
-            # handle detections with no tracker_id
+            # если трек уже менял состояние, то предполагается, что второй раз он его уже не сменит
+            # if (tracker_id is None or
+            #         (self.tracker_state.get(tracker_id) is not None and self.tracker_state[tracker_id][-1])):
+            #     continue
             if tracker_id is None:
                 continue
-            # we check if all four anchors of bbox are on the same side of vector
             x1, y1, x2, y2 = np.concatenate(bbox)
-            if tracker_id in self.tracker_state and not self.tracker_state[tracker_id]:
-                y1 = (2.5 * y1).astype('int32')
-            anchors = [
-                Point(x=x1, y=y1),
-                Point(x=x1, y=y2),
-                Point(x=x2, y=y1),
-                Point(x=x2, y=y2),
-            ]
-            triggers = [self.vector.is_in(point=anchor) for anchor in anchors]
-
-            # detection is partially front and partially out
-            if len(set(triggers)) == 2:
-                continue
-
-            tracker_state = triggers[0]
-            # handle new detection
+            upper_centroid = np.array([x1 + (x2 - x1) / 2, y1]).astype('int32')
+            trigger = self.vector.is_in(point=Point(*upper_centroid))  # центроид внутри или снаружи
+            # если данного id еще нет в базе, он добавляется и отслеживается его первое вхождение -
+            # внутри он был изначально или снаружи
             if tracker_id not in self.tracker_state:
-                self.tracker_state[tracker_id] = tracker_state
+                self.tracker_state[tracker_id] = trigger, False
                 continue
-
-            # handle detection on the same side of the line
-            if self.tracker_state.get(tracker_id) == tracker_state:
+            # если объект остается внутри/снаружи, то скипаем его
+            if self.tracker_state.get(tracker_id)[0] == trigger:
                 continue
-
-            self.tracker_state[tracker_id] = tracker_state
-            if tracker_state:
+            # меняем флаг на противоположный, если человек сменил состояние
+            self.tracker_state[tracker_id] = trigger, True
+            # если был False и стал True, то человек вошел, и наоборот
+            if trigger:
                 self.in_count += 1
             else:
                 self.out_count += 1
-            return {"id": tracker_id, "state": tracker_state}
+            return {"id": tracker_id, "state": trigger}
 
 
 class LineZoneAnnotator:

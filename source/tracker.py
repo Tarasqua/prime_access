@@ -2,6 +2,7 @@
 Reference:
 https://github.com/niconielsen32/ObjectTracking/blob/main/sort.py
 """
+from collections import deque
 
 import lap
 import numpy as np
@@ -95,7 +96,7 @@ class KalmanBoxTracker(object):
         self.time_since_update = 0
         self.id = KalmanBoxTracker.count
         KalmanBoxTracker.count += 1
-        self.history = []
+        self.history = deque(maxlen=30)
         self.hits = 0
         self.hit_streak = 0
         self.age = 0
@@ -105,7 +106,6 @@ class KalmanBoxTracker(object):
         Updates the state vector with observed bbox.
         """
         self.time_since_update = 0
-        self.history = []
         self.hits += 1
         self.hit_streak += 1
         self.kf.update(convert_bbox_to_z(bbox))
