@@ -1,0 +1,31 @@
+BACK_SUB_DATA:
+  GSOC_DATA:
+    NOISE_REMOVAL_THRESHOLD_FAC_BG: 0.005  # коэффициент подавления шума заднего плана
+    NOISE_REMOVAL_THRESHOLD_FAC_FG: 0.01  # коэффициент подавления шума переднего плана
+    PROPAGATION_RATE: 0.2  # вероятность слияния двух масок движения
+    BLINKING_SUPRESSION_DECAY: 0.001  # коэффициент затухания подавления мигания
+    REPLACE_RATE: 0.1  # как быстро модель будет обновляться сама
+  MORPH_CLOSING_DATA:
+    ITERATIONS: 2  # количество итераций
+    KERNEL_SIZE:  # размеры эллипса
+      - 8
+      - 8
+
+HUMAN_DETECTION_DATA:
+  MIN_SQUARE_THRESHOLD: 1200  # для фильтрации сегментов переднего плана по площади
+  SEGM_MODEL_CONFIDENCE: 0.5  # confidence сегментационной модели человека
+  TRACKER_DATA:
+    HISTORY_THRESHOLD: 90  # количество кадров, после которого трек теряется
+    MIN_HITS: 3  # количество кадров, после которого начинается трек
+    IOU_THRESHOLD: 0.4  # IOU между предыдущим и текущим тркеом
+
+LINE_ZONE_DATA:
+  LEFT_POINT:  # координаты левой точки
+    - 1247  # x
+    - 151  # y
+  RIGHT_POINT:  # координаты правой точки
+    - 688  # x
+    - 239  # y
+  LINE_THICKNESS: 2  # толщина линии
+  TEXT_THICKNESS: 1  # толщина текста на линии
+  TEXT_SCALE: 0.5  # размер текста

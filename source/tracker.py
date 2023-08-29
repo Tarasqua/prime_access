@@ -177,14 +177,14 @@ def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
 
 
 class Tracker(object):
-    def __init__(self, max_age, min_hits, iou_threshold):
+    def __init__(self, history_threshold, min_hits, iou_threshold):
         """
         Sets key parameters for Tracker
-        :param max_age: Количество кадров, через которое трек теряется, если он потерялся.
+        :param history_threshold: Количество кадров, через которое трек теряется, если он потерялся.
         :param min_hits: Накопление истории, после которой начинается трек.
         :param iou_threshold: Iou для сравнения меж кадров.
         """
-        self.max_age = max_age
+        self.history_threshold = history_threshold
         self.min_hits = min_hits
         self.iou_threshold = iou_threshold
         self.trackers = []
@@ -229,7 +229,7 @@ class Tracker(object):
                 ret.append(np.concatenate((d, [trk.id + 1])).reshape(1, -1))  # +1 as MOT benchmark requires positive
             i -= 1
             # remove dead trackless
-            if trk.time_since_update > self.max_age:
+            if trk.time_since_update > self.history_threshold:
                 self.trackers.pop(i)
         if len(ret) > 0:
             return np.concatenate(ret)
