@@ -4,21 +4,11 @@ https://github.com/niconielsen32/ObjectTracking/blob/main/sort.py
 """
 from collections import deque
 
-import lap
 import numpy as np
-import scipy
 from filterpy.kalman import KalmanFilter
+from scipy.optimize import linear_sum_assignment as linear_assignment
 
 np.random.seed(0)
-
-
-def linear_assignment(cost_matrix):
-    try:
-        _, x, y = lap.lapjv(cost_matrix, extend_cost=True)
-        return np.array([[y[i], i] for i in x if i >= 0])  #
-    except ImportError:
-        x, y = scipy.optimize.linear_sum_assignment(cost_matrix)
-        return np.array(list(zip(x, y)))
 
 
 def iou_batch(bb_test, bb_gt):
@@ -147,7 +137,7 @@ def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
         if a.sum(1).max() == 1 and a.sum(0).max() == 1:
             matched_indices = np.stack(np.where(a), axis=1)
         else:
-            matched_indices = linear_assignment(-iou_matrix)
+            matched_indices = np.array(list(zip(*linear_assignment(-iou_matrix))))
     else:
         matched_indices = np.empty(shape=(0, 2))
 
@@ -193,7 +183,7 @@ class Tracker(object):
     def update(self, dets=np.empty((0, 5))):
         """
         Params:
-          dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
+        dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
         Requires: this method must be called once for each frame even with empty detections (use np.empty((0, 5)) for frames without detections).
         Returns the a similar array, where the last column is the object ID.
 
