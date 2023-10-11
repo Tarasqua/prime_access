@@ -11,7 +11,7 @@ class BackgroundSubtractor:
     """
 
     def __init__(self, frame_shape: np.array, area_threshold: float,
-                 history: int = 500, threshold: int = 16, detect_shadows: bool = True):
+                 history: int = 1500, threshold: int = 16, detect_shadows: bool = True):
         self.history, self.threshold, self.detect_shadows = history, threshold, detect_shadows
         self.back_sub_model = cv2.createBackgroundSubtractorMOG2(
             history=history, varThreshold=threshold, detectShadows=detect_shadows)
@@ -21,8 +21,6 @@ class BackgroundSubtractor:
         self.area_threshold = area_threshold
         self.frame_shape = frame_shape[:-1][::-1]
         self.resize_shape = (np.array(self.frame_shape) / 8).astype(int)
-
-        self.frame = None
 
     def __get_fg_mask(self, current_frame: np.array) -> np.ndarray:
         """
@@ -38,7 +36,7 @@ class BackgroundSubtractor:
         eroding = cv2.erode(fg_mask, self.dilate_erode_kernel, iterations=1)  # эрозия
         dilating = cv2.dilate(eroding, self.dilate_erode_kernel, iterations=1)  # дилатация
         closing = cv2.morphologyEx(  # морфологическое закрытие
-            dilating, cv2.MORPH_CLOSE, self.morph_close_kernel, iterations=1)
+            dilating, cv2.MORPH_CLOSE, self.morph_close_kernel, iterations=2)
         return cv2.resize(closing, self.frame_shape)  # в исходный размер
 
     def get_fg_bboxes(self, current_frame: np.array) -> np.ndarray:
@@ -50,6 +48,7 @@ class BackgroundSubtractor:
             fg_bboxes: np.ndarray формата [[x1, y1, x2, y2], [x1, y1, x2, y2], ...]
         """
         fg_mask = self.__get_fg_mask(current_frame)
+        # cv2.imshow('dst', cv2.resize(fg_mask, (np.array(fg_mask.shape[::-1]) / 2).astype(int)))
         contours, _ = cv2.findContours(  # находим контуры
             image=fg_mask, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_NONE)
         fg_bboxes = np.fromiter(map(  # распаковка из xywh в xyxy и фильтрация по площади от мелких шумов
