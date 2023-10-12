@@ -74,15 +74,15 @@ class Plots:
             bboxes_tasks.append(asyncio.create_task(
                 self.__plot_person_bbox(detection.boxes.xyxy.data.numpy()[0], detection.boxes.id.data.numpy()[0])
             ))
-            if detection.keypoints.data.numpy()[0][5][-1] < 0.8 or detection.keypoints.data.numpy()[0][6][-1] < 0.8:
-                continue
-            x, y = detection.keypoints.data.numpy()[0][0][:-1].astype(int)
-            if detection.keypoints.data.numpy()[0][6][0] < detection.keypoints.data.numpy()[0][5][0]:
-                cv2.putText(self.frame, 'leaving', (x, y - 10),
-                            cv2.FONT_HERSHEY_COMPLEX, 2, (255, 255, 255))
-            else:
-                cv2.putText(self.frame, 'entering', (x, y - 10),
-                            cv2.FONT_HERSHEY_COMPLEX, 2, (255, 255, 255))
+            # if detection.keypoints.data.numpy()[0][5][-1] < 0.8 or detection.keypoints.data.numpy()[0][6][-1] < 0.8:
+            #     continue
+            # x, y = detection.keypoints.data.numpy()[0][0][:-1].astype(int)
+            # if detection.keypoints.data.numpy()[0][6][0] < detection.keypoints.data.numpy()[0][5][0]:
+            #     cv2.putText(self.frame, 'leaving', (x, y - 10),
+            #                 cv2.FONT_HERSHEY_COMPLEX, 2, (255, 255, 255))
+            # else:
+            #     cv2.putText(self.frame, 'entering', (x, y - 10),
+            #                 cv2.FONT_HERSHEY_COMPLEX, 2, (255, 255, 255))
         for skeleton_task in skeleton_tasks:
             await skeleton_task
         for bboxes_task in bboxes_tasks:
