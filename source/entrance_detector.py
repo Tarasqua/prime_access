@@ -100,7 +100,7 @@ class EntranceDetector:
         cv2.fillPoly(stencil, [roi], (255, 255, 255))
         return stencil
 
-    async def update_track(self, detection) -> None:
+    async def __update_track(self, detection) -> None:
         """
         Обработка затреченных людей в ROI:
             Записывает id трека.
@@ -123,21 +123,19 @@ class EntranceDetector:
         self.tracking_people[human_id][2].append([x1 + x2 / 2, y1 + y2 / 2])  # центроид
         self.tracking_people[human_id][3].append(is_entering)  # вошел / вышел
 
-    def was_track_moving(self, centroids: np.array) -> bool:
+    @staticmethod
+    def __was_track_moving(centroids: np.array) -> bool:
         """
         Определяет, шел человек или стоял на месте в ROI:
-            Считаем скользящее среднее по центроиду человека, а затем с помощью polyfit смотрим, какой угол
-            наклона полученной линейной функции. Если больше нуля, то человек двигался, иначе - стоял на месте
+            С помощью polyfit смотрим, какой угол наклона у линейной функции, полученной из координат центроида.
+            Если больше нуля, то человек двигался, иначе - стоял на месте.
         Parameters:
             centroids: массив центроидов по человеку в формате np.array([[x, y], [x, y], ...])
         Returns:
             was_moving: True, если да, False - нет
         """
-        cumulative_sum = np.cumsum(np.insert(centroids, 0, 0))
-        moving_average = ((cumulative_sum[self.moving_average_window:] -
-                           cumulative_sum[:-self.moving_average_window]) / self.moving_average_window)
-        k, _ = np.polyfit(np.arange(len(moving_average)), moving_average, 1)
-        return np.abs(np.degrees(np.arctan(k))) < 100
+        k, _ = np.polyfit(centroids[:, 0], centroids[:, 1], 1)
+        return 25 < np.abs(np.degrees(np.arctan(k))) < 90  # смотрим, чтобы угол был острый
 
     async def collect_data(self) -> None:
         """
@@ -148,7 +146,7 @@ class EntranceDetector:
         for (frames_counter, bboxes, centroids, is_entering) in self.tracking_people.values():
             if frames_counter < self.actions_threshold:  # отсекаем малые движения
                 continue
-            if not self.was_track_moving(centroids):  # и тех, кто стоял на месте
+            if not self.__was_track_moving(np.array(centroids)):  # и тех, кто стоял на месте
                 continue
             new_id = (max(self.collected_data.keys()) + 1) if self.collected_data else 1
             self.collected_data[new_id] = \
@@ -164,7 +162,7 @@ class EntranceDetector:
                 cv2.bitwise_and(self.current_frame, self.det_stencil),  # трек в раздутой roi
                 classes=[0], verbose=False, persist=True, conf=self.yolo_confidence)[0]
             if detections.boxes.data.numpy().shape[0] != 0:  # если нашли кого-либо
-                tracking_tasks = [asyncio.create_task(self.update_track(detection))  # добавляем в треки
+                tracking_tasks = [asyncio.create_task(self.__update_track(detection))  # добавляем в треки
                                   for detection in detections if detection.boxes.id is not None]  # отсекаем без id
                 [await task for task in tracking_tasks]
         else:
