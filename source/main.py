@@ -32,7 +32,7 @@ class Main:
                  for (idx, picture) in enumerate(pictures)]
 
     async def main(self):
-        """..."""
+        """Временная имплементация мейна для тестов"""
         cap = cv2.VideoCapture(self.stream_source)
         _, frame = cap.read()
         assert frame is not None
@@ -65,6 +65,6 @@ class Main:
 
 
 if __name__ == '__main__':
-    main = Main('new_office_test.mp4')
-    # main = Main('crowd.mp4')
+    # main = Main('new_office_test.mp4')
+    main = Main('crowd.mp4')
     asyncio.run(main.main())

@@ -1,5 +1,5 @@
 """
-...
+@tarasqua
 """
 import datetime
 import os
@@ -19,19 +19,18 @@ from utils.math_funtions import *
 
 
 class EntranceDetector:
-    """..."""
+    """Детектор входа и выхода людей в секторе"""
 
     def __init__(self, frame_shape: np.array, frame_dtype, roi: np.array,
                  yolo_model: str = 'n', yolo_confidence: float = 0.25,
                  fg_history: int = 1000, fg_threshold: int = 16, fg_detect_shadows: bool = True):
-        area_threshold = Polygon(roi).area * 0.2
+        area_threshold = Polygon(roi).area * 0.2  # движущийся объект должен занимать часть ROI
         self.bg_subtractor = BackgroundSubtractor(
             frame_shape, area_threshold, fg_history, fg_threshold, fg_detect_shadows)
 
         # маска roi для вычитания фона и трекинга (раздуваем полигон для трекинга)
-        self.bg_stencil = self.__get_roi_mask(
-            frame_shape, frame_dtype, roi)
-        self.det_stencil = self.__get_roi_mask(
+        self.bg_stencil = self.__get_roi_mask(frame_shape, frame_dtype, roi)
+        self.det_stencil = self.__get_roi_mask(  # раздуваем маску для лучшей работы YOLO
             frame_shape, frame_dtype, self.__inflate_polygon(roi, 1.75).astype(int))
 
         self.yolo_pose = self.__set_yolo_model(yolo_model)
@@ -137,23 +136,38 @@ class EntranceDetector:
         k, _ = np.polyfit(centroids[:, 0], centroids[:, 1], 1)
         return 25 < np.abs(np.degrees(np.arctan(k))) < 90  # смотрим, чтобы угол был острый
 
-    async def collect_data(self) -> None:
+    async def collect_data(self, human_id: int, tracking_data: list) -> None:
         """
-        Запись полученных данных по трекам в итоговый словарь для отправки на сервер с детекцией лиц
+        Запись полученных данных по треку (одному) в итоговый словарь для отправки на сервер для
+        дальнейшей детекции идентификации
             Формат выходных данных:
-            id + 1 = tuple([кадры с людьми], вошел/вышел, время и дата обнаружения)
+            id + 1 = tuple([кадры с людьми], вошел/вышел, время и дата обнаружения в формате datetime)
+        Parameters:
+            human_id: id, который нужно присвоить полученным данным
+            tracking_data: данные по треку - счетчик кадров наблюдения; кадры детекции;
+                        координаты центроида; статистика вошел/вышел
         """
-        for (frames_counter, bboxes, centroids, is_entering) in self.tracking_people.values():
-            if frames_counter < self.actions_threshold:  # отсекаем малые движения
-                continue
-            if not self.__was_track_moving(np.array(centroids)):  # и тех, кто стоял на месте
-                continue
-            new_id = (max(self.collected_data.keys()) + 1) if self.collected_data else 1
-            self.collected_data[new_id] = \
-                (bboxes, is_entering.count(True) > is_entering.count(False), datetime.datetime.now())
+        frames_counter, bboxes, centroids, is_entering = tracking_data
+        if frames_counter > self.actions_threshold:
+            if self.__was_track_moving(np.array(centroids)):
+                self.collected_data[human_id] = \
+                    (bboxes, is_entering.count(True) > is_entering.count(False), datetime.datetime.now())
+        print(human_id)
 
     async def detect_(self, current_frame: np.ndarray) -> None:
-        """..."""
+        """
+        Обработка кадра детектором контроля доступа:
+            - получение маски движения в ROI;
+            - если движение есть, включается YOLO-трекер;
+            - если в раздутой маске ROI (для большей точности работы YOLO) обнаружены люди, они заносятся в
+                отдельный временный словарь с текущими треками;
+            - как только движения прекратились (человек/люди зашли/вышли), данные обрабатываются и закидываются
+                на сервер для дальнейшей детекции лиц и хранения данных в базе.
+        Формат выходных данных на сервер:
+            dict: keys - id, values - tuple([кадры с людьми], вошел/вышел, время и дата обнаружения в формате datetime)
+        Parameters:
+            current_frame: текущий кадр, пришедший со стрима
+        """
         self.current_frame = current_frame  # чтобы вырезать человека не из маски, а из ориг. изображения
         fg_bboxes = self.bg_subtractor.get_fg_bboxes(cv2.bitwise_and(self.current_frame, self.bg_stencil))
         if fg_bboxes.size != 0:
@@ -166,5 +180,12 @@ class EntranceDetector:
                                   for detection in detections if detection.boxes.id is not None]  # отсекаем без id
                 [await task for task in tracking_tasks]
         else:
-            await self.collect_data()
+            # Перестраховываемся, чтобы даже если YOLO ре-идентифицировал человека и присвоил ему тот же id
+            # мы все равно записали его несколько раз - при выходе и скором входе. А так как id нужен лишь для того,
+            # чтобы данные не перемешивались, то даже если они будут пропускаться - не важно. Главное - уникальность
+            last_collected_id = max(self.collected_data.keys()) if self.collected_data else 0
+            # обрабатываем полученную информацию по трекам
+            collecting_tasks = [asyncio.create_task(self.collect_data(last_collected_id + human_id, tracking_data))
+                                for human_id, tracking_data in self.tracking_people.items()]
+            [await task for task in collecting_tasks]
             self.tracking_people = {}  # обнуляем треки
