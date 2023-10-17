@@ -24,6 +24,8 @@ class Transmitter:
         TODO: временное решение в виде простого сохранения заменить на отправку данных
         """
         detections_folder_path = os.path.join(Path(__file__).resolve().parents[1], 'resources', 'detections')
+        if not os.path.exists(detections_folder_path):
+            os.mkdir(detections_folder_path)
         if data.has_entered:
             entering_dir_path = os.path.join(detections_folder_path, 'entering')
             save_directory = os.path.join(entering_dir_path, str(len(os.listdir(entering_dir_path)) + 1))
