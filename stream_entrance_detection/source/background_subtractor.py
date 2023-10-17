@@ -10,17 +10,21 @@ class BackgroundSubtractor:
     Нахождение маски движения
     """
 
-    def __init__(self, frame_shape: np.array, area_threshold: float,
-                 history: int = 1500, threshold: int = 16, detect_shadows: bool = True):
-        self.history, self.threshold, self.detect_shadows = history, threshold, detect_shadows
+    def __init__(self, frame_shape: np.array, area_threshold: float, config_data: dict):
+        history, threshold, detect_shadows = list(config_data['MOG_MODEL'].values())
         self.back_sub_model = cv2.createBackgroundSubtractorMOG2(
             history=history, varThreshold=threshold, detectShadows=detect_shadows)
-        self.dilate_erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-        self.morph_close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+
+        self.dilate_erode_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, tuple(config_data['ERODE_DILATE']['KERNEL_SIZE']))
+        self.dilate_erode_iterations = config_data['ERODE_DILATE']['ITERATIONS']
+        self.morph_close_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, tuple(config_data['MORPH_CLOSE']['KERNEL_SIZE']))
+        self.morph_close_iterations = config_data['MORPH_CLOSE']['ITERATIONS']
 
         self.area_threshold = area_threshold
         self.frame_shape = frame_shape[:-1][::-1]
-        self.resize_shape = (np.array(self.frame_shape) / 8).astype(int)
+        self.resize_shape = (np.array(self.frame_shape) / config_data['REDUCE_FRAME_SHAPE_MULTIPLIER']).astype(int)
 
     def __get_fg_mask(self, current_frame: np.array) -> np.ndarray:
         """
@@ -33,10 +37,10 @@ class BackgroundSubtractor:
         resized_frame = cv2.resize(current_frame, self.resize_shape)  # для большей производительности уменьшаем
         fg_mask = self.back_sub_model.apply(resized_frame)  # маска переднего плана
         fg_mask[fg_mask == 127] = 0  # удаляем тени
-        eroding = cv2.erode(fg_mask, self.dilate_erode_kernel, iterations=1)  # эрозия
-        dilating = cv2.dilate(eroding, self.dilate_erode_kernel, iterations=1)  # дилатация
+        eroding = cv2.erode(fg_mask, self.dilate_erode_kernel, iterations=self.dilate_erode_iterations)  # эрозия
+        dilating = cv2.dilate(eroding, self.dilate_erode_kernel, iterations=self.dilate_erode_iterations)  # дилатация
         closing = cv2.morphologyEx(  # морфологическое закрытие
-            dilating, cv2.MORPH_CLOSE, self.morph_close_kernel, iterations=2)
+            dilating, cv2.MORPH_CLOSE, self.morph_close_kernel, iterations=self.morph_close_iterations)
         return cv2.resize(closing, self.frame_shape)  # в исходный размер
 
     def get_fg_bboxes(self, current_frame: np.array) -> np.ndarray:

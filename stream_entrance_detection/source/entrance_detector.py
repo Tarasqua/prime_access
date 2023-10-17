@@ -1,13 +1,12 @@
 """
 @tarasqua
 """
-import datetime
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 import asyncio
-from itertools import chain
-from collections import deque, defaultdict
+import multiprocessing
 
 import cv2
 import numpy as np
@@ -15,37 +14,44 @@ from ultralytics import YOLO
 from shapely.geometry import Polygon
 
 from background_subtractor import BackgroundSubtractor
-from utils.math_funtions import *
+from stream_entrance_detection.utils.math_funtions import cart2pol, pol2cart
+from stream_entrance_detection.utils.templates import TrackingPerson, PreprocessedPerson
+from config_loader import EntranceConfig
+from transmitter import Transmitter
 
 
 class EntranceDetector:
     """Детектор входа и выхода людей в секторе"""
 
-    def __init__(self, frame_shape: np.array, frame_dtype, roi: np.array,
-                 yolo_model: str = 'n', yolo_confidence: float = 0.25,
-                 fg_history: int = 1000, fg_threshold: int = 16, fg_detect_shadows: bool = True):
-        area_threshold = Polygon(roi).area * 0.2  # движущийся объект должен занимать часть ROI
+    def __init__(self, frame_shape: np.array, frame_dtype, roi: np.array):
+        config_ = EntranceConfig()
+        # движущийся объект должен занимать часть ROI
+        area_threshold = Polygon(roi).area * config_.get('ENTRANCE_DETECTOR', 'ROI', 'MOVING_ROI_PART')
         self.bg_subtractor = BackgroundSubtractor(
-            frame_shape, area_threshold, fg_history, fg_threshold, fg_detect_shadows)
+            frame_shape, area_threshold, config_.get('BG_SUBTRACTION'))
 
         # маска roi для вычитания фона и трекинга (раздуваем полигон для трекинга)
         self.bg_stencil = self.__get_roi_mask(frame_shape, frame_dtype, roi)
-        self.det_stencil = self.__get_roi_mask(  # раздуваем маску для лучшей работы YOLO
-            frame_shape, frame_dtype, self.__inflate_polygon(roi, 1.75).astype(int))
+        self.det_stencil = self.__get_roi_mask(
+            frame_shape, frame_dtype,
+            self.__inflate_polygon(  # раздуваем маску для лучшей работы YOLO
+                roi, config_.get('ENTRANCE_DETECTOR', 'ROI', 'ROI_SCALE_MULTIPLIER')).astype(int))
 
-        self.yolo_pose = self.__set_yolo_model(yolo_model)
-        self.yolo_confidence = yolo_confidence
+        self.yolo_pose = self.__set_yolo_model(config_.get('ENTRANCE_DETECTOR', 'YOLO', 'YOLO_MODEL'))
+        self.yolo_confidence = config_.get('ENTRANCE_DETECTOR', 'YOLO', 'YOLO_CONFIDENCE')
         # чтобы не было провисания во время рантайма
         self.yolo_pose.predict(
             np.random.randint(255, size=(300, 300, 3), dtype=np.uint8), classes=[0], verbose=False)
 
-        self.tracking_people = {}
-        self.collected_data = {}
-        self.current_frame = None
+        self.transmitter = Transmitter()
 
-        self.take_picture_counter = 50
-        self.actions_threshold = 30
-        self.moving_average_window = 10
+        self.save_frame_timer = config_.get('ENTRANCE_DETECTOR', 'PROCESSING', 'SAVE_FRAME_TIMER')
+        self.actions_threshold = config_.get('ENTRANCE_DETECTOR', 'PROCESSING', 'ACTIONS_THRESHOLD')
+        self.centroid_angle_thresh = config_.get('ENTRANCE_DETECTOR', 'CENTROID_ANGLE_THRESH')
+
+        self.tracking_people = {}
+        self.preprocessed_data = {}
+        self.current_frame = None
 
     @staticmethod
     def __set_yolo_model(yolo_model) -> YOLO:
@@ -113,17 +119,20 @@ class EntranceDetector:
         human_id = detection.boxes.id.numpy()[0].astype(int)
         is_entering = (detection.keypoints.data.numpy()[0][5][0] >  # левое плечо
                        detection.keypoints.data.numpy()[0][6][0])  # правое плечо
-        # Счетчик кадров наблюдения; кадры детекции; координаты центроида; статистика вошел/вышел
-        self.tracking_people.setdefault(human_id, [1, deque(maxlen=25), deque(maxlen=60), deque(maxlen=60)])
-        self.tracking_people[human_id][0] += 1  # счетчик трека
+        self.tracking_people.setdefault(human_id, TrackingPerson())
         x1, y1, x2, y2 = detection.boxes.data.numpy()[0][:4].astype(int)
-        if self.tracking_people[human_id][0] % self.take_picture_counter:
-            self.tracking_people[human_id][1].append(self.current_frame[y1:y2, x1:x2])  # пикчи
-        self.tracking_people[human_id][2].append([x1 + x2 / 2, y1 + y2 / 2])  # центроид
-        self.tracking_people[human_id][3].append(is_entering)  # вошел / вышел
+        # раз в N кадров добавляем кадры детекции
+        if self.tracking_people[human_id].frames_counter % self.save_frame_timer:
+            self.tracking_people[human_id].update(
+                frames_counter=1, detection_frames=self.current_frame[y1:y2, x1:x2],
+                centroid_coordinates=[x1 + x2 / 2, y1 + y2 / 2], is_entering_statistics=is_entering
+            )
+        else:
+            self.tracking_people[human_id].update(
+                frames_counter=1, centroid_coordinates=[x1 + x2 / 2, y1 + y2 / 2], is_entering_statistics=is_entering
+            )
 
-    @staticmethod
-    def __was_track_moving(centroids: np.array) -> bool:
+    def __was_track_moving(self, centroids: np.array) -> bool:
         """
         Определяет, шел человек или стоял на месте в ROI:
             С помощью polyfit смотрим, какой угол наклона у линейной функции, полученной из координат центроида.
@@ -134,25 +143,25 @@ class EntranceDetector:
             was_moving: True, если да, False - нет
         """
         k, _ = np.polyfit(centroids[:, 0], centroids[:, 1], 1)
-        return 25 < np.abs(np.degrees(np.arctan(k))) < 90  # смотрим, чтобы угол был острый
+        # смотрим, чтобы угол был острый
+        return self.centroid_angle_thresh['FROM'] < np.abs(np.degrees(np.arctan(k))) < self.centroid_angle_thresh['TO']
 
-    async def collect_data(self, human_id: int, tracking_data: list) -> None:
+    async def __preprocess_data(self, human_id: int, tracking_data: TrackingPerson) -> None:
         """
-        Запись полученных данных по треку (одному) в итоговый словарь для отправки на сервер для
-        дальнейшей детекции идентификации
-            Формат выходных данных:
-            id + 1 = tuple([кадры с людьми], вошел/вышел, время и дата обнаружения в формате datetime)
+        Предобработка полученных данных по треку (одному!) в итоговый словарь для отправки на сервер для
+        дальнейшей идентификации.
         Parameters:
             human_id: id, который нужно присвоить полученным данным
-            tracking_data: данные по треку - счетчик кадров наблюдения; кадры детекции;
-                        координаты центроида; статистика вошел/вышел
+            tracking_data: данные по треку в формате TrackingPerson()
         """
-        frames_counter, bboxes, centroids, is_entering = tracking_data
-        if frames_counter > self.actions_threshold:
-            if self.__was_track_moving(np.array(centroids)):
-                self.collected_data[human_id] = \
-                    (bboxes, is_entering.count(True) > is_entering.count(False), datetime.datetime.now())
-        print(human_id)
+        if tracking_data.frames_counter > self.actions_threshold:
+            if self.__was_track_moving(np.array(tracking_data.centroid_coordinates)):
+                self.preprocessed_data[human_id] = PreprocessedPerson(
+                    detection_frames=tracking_data.detection_frames,
+                    has_entered=tracking_data.is_entering_statistics.count(
+                        True) > tracking_data.is_entering_statistics.count(False),
+                    detection_time=datetime.now()
+                )
 
     async def detect_(self, current_frame: np.ndarray) -> None:
         """
@@ -171,7 +180,7 @@ class EntranceDetector:
         self.current_frame = current_frame  # чтобы вырезать человека не из маски, а из ориг. изображения
         fg_bboxes = self.bg_subtractor.get_fg_bboxes(cv2.bitwise_and(self.current_frame, self.bg_stencil))
         if fg_bboxes.size != 0:
-            # если есть движение в roi, начинаем тречить людей
+            # Если есть движение в roi, начинаем тречить людей
             detections = self.yolo_pose.track(
                 cv2.bitwise_and(self.current_frame, self.det_stencil),  # трек в раздутой roi
                 classes=[0], verbose=False, persist=True, conf=self.yolo_confidence)[0]
@@ -183,9 +192,24 @@ class EntranceDetector:
             # Перестраховываемся, чтобы даже если YOLO ре-идентифицировал человека и присвоил ему тот же id
             # мы все равно записали его несколько раз - при выходе и скором входе. А так как id нужен лишь для того,
             # чтобы данные не перемешивались, то даже если они будут пропускаться - не важно. Главное - уникальность
-            last_collected_id = max(self.collected_data.keys()) if self.collected_data else 0
+            last_preprocessed_id = max(self.preprocessed_data.keys()) if self.preprocessed_data else 0
             # обрабатываем полученную информацию по трекам
-            collecting_tasks = [asyncio.create_task(self.collect_data(last_collected_id + human_id, tracking_data))
-                                for human_id, tracking_data in self.tracking_people.items()]
-            [await task for task in collecting_tasks]
+            preprocessing_tasks = [
+                asyncio.create_task(self.__preprocess_data(last_preprocessed_id + human_id, tracking_data))
+                for human_id, tracking_data in self.tracking_people.items()]
+            [await task for task in preprocessing_tasks]
             self.tracking_people = {}  # обнуляем треки
+        if self.preprocessed_data:
+            # Для простоты отладки, если есть какие-либо данные, закидываем их на сервер в отдельном потоке;
+            # в дальнейшем будем делать это при другом условии (например, когда нет движения какое-то время).
+            # TODO: подумать над условием отправки данных на сервер
+            with multiprocessing.Pool() as pool:
+                # pool.map_async(
+                #     transfer_data, [data for data in self.preprocessed_data.values()], callback=transfer_callback)
+                pool.map_async(
+                    self.transmitter.transmit_, [data for data in self.preprocessed_data.values()],
+                    callback=self.transmitter.callback_
+                )
+                pool.close()
+                pool.join()
+            self.preprocessed_data = {}  # обнуляем данные
