@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from shapely.geometry import Polygon
+from typing import List, Dict
 
 from background_subtractor import BackgroundSubtractor
 from stream_entrance_detection.utils.math_funtions import cart2pol, pol2cart
@@ -49,8 +50,8 @@ class EntranceDetector:
         self.actions_threshold = config_.get('ENTRANCE_DETECTOR', 'PROCESSING', 'ACTIONS_THRESHOLD')
         self.centroid_angle_thresh = config_.get('ENTRANCE_DETECTOR', 'CENTROID_ANGLE_THRESH')
 
-        self.tracking_people = {}
-        self.preprocessed_data = {}
+        self.tracking_people: Dict[int, TrackingPerson] = {}
+        self.preprocessed_data: List[PreprocessedPerson] = []
         self.current_frame = None
 
     @staticmethod
@@ -146,22 +147,22 @@ class EntranceDetector:
         # смотрим, чтобы угол был острый
         return self.centroid_angle_thresh['FROM'] < np.abs(np.degrees(np.arctan(k))) < self.centroid_angle_thresh['TO']
 
-    async def __preprocess_data(self, human_id: int, tracking_data: TrackingPerson) -> None:
+    async def __preprocess_data(self, tracking_data: TrackingPerson) -> None:
         """
         Предобработка полученных данных по треку (одному!) в итоговый словарь для отправки на сервер для
         дальнейшей идентификации.
         Parameters:
-            human_id: id, который нужно присвоить полученным данным
             tracking_data: данные по треку в формате TrackingPerson()
         """
         if tracking_data.frames_counter > self.actions_threshold:
             if self.__was_track_moving(np.array(tracking_data.centroid_coordinates)):
-                self.preprocessed_data[human_id] = PreprocessedPerson(
-                    detection_frames=tracking_data.detection_frames,
-                    has_entered=tracking_data.is_entering_statistics.count(
-                        True) > tracking_data.is_entering_statistics.count(False),
-                    detection_time=datetime.now()
-                )
+                self.preprocessed_data.append(
+                    PreprocessedPerson(  # id проставляется автоматически при создании
+                        detection_frames=tracking_data.detection_frames,
+                        has_entered=tracking_data.is_entering_statistics.count(
+                            True) > tracking_data.is_entering_statistics.count(False),
+                        detection_time=datetime.now()
+                    ))
 
     async def detect_(self, current_frame: np.ndarray) -> None:
         """
@@ -189,27 +190,20 @@ class EntranceDetector:
                                   for detection in detections if detection.boxes.id is not None]  # отсекаем без id
                 [await task for task in tracking_tasks]
         else:
-            # Перестраховываемся, чтобы даже если YOLO ре-идентифицировал человека и присвоил ему тот же id
-            # мы все равно записали его несколько раз - при выходе и скором входе. А так как id нужен лишь для того,
-            # чтобы данные не перемешивались, то даже если они будут пропускаться - не важно. Главное - уникальность
-            last_preprocessed_id = max(self.preprocessed_data.keys()) if self.preprocessed_data else 0
             # обрабатываем полученную информацию по трекам
-            preprocessing_tasks = [
-                asyncio.create_task(self.__preprocess_data(last_preprocessed_id + human_id, tracking_data))
-                for human_id, tracking_data in self.tracking_people.items()]
+            preprocessing_tasks = [asyncio.create_task(self.__preprocess_data(tracking_data))
+                                   for tracking_data in self.tracking_people.values()]
             [await task for task in preprocessing_tasks]
-            self.tracking_people = {}  # обнуляем треки
+            self.tracking_people.clear()  # обнуляем треки
         if self.preprocessed_data:
             # Для простоты отладки, если есть какие-либо данные, закидываем их на сервер в отдельном потоке;
             # в дальнейшем будем делать это при другом условии (например, когда нет движения какое-то время).
             # TODO: подумать над условием отправки данных на сервер
             with multiprocessing.Pool() as pool:
-                # pool.map_async(
-                #     transfer_data, [data for data in self.preprocessed_data.values()], callback=transfer_callback)
                 pool.map_async(
-                    self.transmitter.transmit_, [data for data in self.preprocessed_data.values()],
+                    self.transmitter.transmit_, [data for data in self.preprocessed_data],
                     callback=self.transmitter.callback_
                 )
                 pool.close()
                 pool.join()
-            self.preprocessed_data = {}  # обнуляем данные
+            self.preprocessed_data.clear()  # обнуляем данные

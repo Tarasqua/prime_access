@@ -1,7 +1,8 @@
 """..."""
 import datetime
 from collections import deque
-from pydantic import BaseModel
+from uuid import UUID, uuid4
+from pydantic import BaseModel, Field
 
 
 class TrackingPerson(BaseModel):
@@ -36,10 +37,12 @@ class PreprocessedPerson(BaseModel):
     """
     Структура данных для предобработанного человека
     Parameters:
+        person_id: уникальный id, который будет присваиваться при создании
         detection_frames: кропнутые кадры трека
         has_entered: вошел (True) или вышел (False) человек
         detection_time: время обнаружения
     """
+    person_id: UUID = Field(default_factory=uuid4)
     detection_frames: deque = deque(maxlen=25)
     has_entered: bool = True
     detection_time: datetime.datetime = datetime.datetime.now()

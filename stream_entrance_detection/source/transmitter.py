@@ -28,11 +28,11 @@ class Transmitter:
             os.mkdir(detections_folder_path)
         if data.has_entered:
             entering_dir_path = os.path.join(detections_folder_path, 'entering')
-            save_directory = os.path.join(entering_dir_path, str(len(os.listdir(entering_dir_path)) + 1))
+            save_directory = os.path.join(entering_dir_path, str(data.person_id))
             os.mkdir(save_directory)
         else:
             leaving_dir_path = os.path.join(detections_folder_path, 'leaving')
-            save_directory = os.path.join(leaving_dir_path, str(len(os.listdir(leaving_dir_path)) + 1))
+            save_directory = os.path.join(leaving_dir_path, str(data.person_id))
             os.mkdir(save_directory)
         [cv2.imwrite(os.path.join(save_directory, f'{idx}.png'), picture)
          for (idx, picture) in enumerate(data.detection_frames)]
