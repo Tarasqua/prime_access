@@ -48,6 +48,6 @@ class Main:
 
 
 if __name__ == '__main__':
-    main = Main('../resources/videos/new_office_test.mp4')
+    main = Main('../../resources/videos/new_office_test.mp4')
     # main = Main('../resources/videos/crowd.mp4')
     asyncio.run(main.main())

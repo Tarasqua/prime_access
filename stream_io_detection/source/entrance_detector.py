@@ -6,19 +6,18 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 import asyncio
-import multiprocessing
+from typing import List, Dict
 
 import cv2
 import numpy as np
 from ultralytics import YOLO
 from shapely.geometry import Polygon
-from typing import List, Dict
 
 from background_subtractor import BackgroundSubtractor
-from stream_entrance_detection.utils.math_funtions import cart2pol, pol2cart
-from stream_entrance_detection.utils.templates import TrackingPerson, PreprocessedPerson
+from utils.math_funtions import cart2pol, pol2cart
+from utils.templates import TrackingPerson, PreprocessedPerson
 from config_loader import EntranceConfig
-from transmitter import Transmitter
+from publisher import Publisher
 
 
 class EntranceDetector:
@@ -44,7 +43,7 @@ class EntranceDetector:
         self.yolo_pose.predict(
             np.random.randint(255, size=(300, 300, 3), dtype=np.uint8), classes=[0], verbose=False)
 
-        self.transmitter = Transmitter()
+        self.publisher = Publisher()
 
         self.save_frame_timer = config_.get('ENTRANCE_DETECTOR', 'PROCESSING', 'SAVE_FRAME_TIMER')
         self.actions_threshold = config_.get('ENTRANCE_DETECTOR', 'PROCESSING', 'ACTIONS_THRESHOLD')
@@ -196,14 +195,7 @@ class EntranceDetector:
             [await task for task in preprocessing_tasks]
             self.tracking_people.clear()  # обнуляем треки
         if self.preprocessed_data:
-            # Для простоты отладки, если есть какие-либо данные, закидываем их на сервер в отдельном потоке;
-            # в дальнейшем будем делать это при другом условии (например, когда нет движения какое-то время).
             # TODO: подумать над условием отправки данных на сервер
-            with multiprocessing.Pool() as pool:
-                pool.map_async(
-                    self.transmitter.transmit_, [data for data in self.preprocessed_data],
-                    callback=self.transmitter.callback_
-                )
-                pool.close()
-                pool.join()
+            publish_tasks = [asyncio.create_task(self.publisher.publish_(data)) for data in self.preprocessed_data]
+            [await task for task in publish_tasks]
             self.preprocessed_data.clear()  # обнуляем данные
