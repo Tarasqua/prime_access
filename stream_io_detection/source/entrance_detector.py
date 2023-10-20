@@ -124,6 +124,8 @@ class EntranceDetector:
         if self.tracking_people[human_id].frames_counter % self.save_frame_timer:
             self.tracking_people[human_id].update(
                 frames_counter=1, detection_frames=self.current_frame[y1:y2, x1:x2],
+                left_shoulder=detection.keypoints.data.numpy()[0][5][:-1] - np.array([x1, y1]),  # отн. координаты
+                right_shoulder=detection.keypoints.data.numpy()[0][6][:-1] - np.array([x1, y1]),
                 centroid_coordinates=[x1 + x2 / 2, y1 + y2 / 2], is_entering_statistics=is_entering
             )
         else:
@@ -157,6 +159,8 @@ class EntranceDetector:
                 self.preprocessed_data.append(
                     PreprocessedPerson(  # id проставляется автоматически при создании
                         detection_frames=tracking_data.detection_frames,
+                        left_shoulder=tracking_data.left_shoulder,
+                        right_shoulder=tracking_data.right_shoulder,
                         has_entered=tracking_data.is_entering_statistics.count(
                             True) > tracking_data.is_entering_statistics.count(False),
                         detection_time=datetime.now()
