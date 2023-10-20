@@ -56,8 +56,8 @@ class FaceClassifier:
         segmented = cv2.bitwise_and(  # применяем маску к исходному изображению
             image, image, mask=cv2.resize(mask_wo_black, image.shape[:-1][::-1]).astype('uint8'))
         return cv2.cvtColor(
-            image[:max(left_shoulder[1], right_shoulder[1]),
-                  min(left_shoulder[0], right_shoulder[0]):max(left_shoulder[0], right_shoulder[0])],
+            segmented[:max(left_shoulder[1], right_shoulder[1]),
+                      min(left_shoulder[0], right_shoulder[0]):max(left_shoulder[0], right_shoulder[0])],
             cv2.COLOR_BGR2GRAY)
 
     async def classify_(self, person_data: PreprocessedPerson):
