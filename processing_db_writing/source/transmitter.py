@@ -8,7 +8,7 @@ from utils.templates import PreprocessedPerson
 
 
 class Transmitter:
-    """..."""
+    """Общение между базой данных и классификацией человека"""
 
     def __init__(self):
         pass

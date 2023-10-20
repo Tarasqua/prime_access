@@ -16,7 +16,7 @@ from shapely.geometry import Polygon
 from background_subtractor import BackgroundSubtractor
 from utils.math_funtions import cart2pol, pol2cart
 from utils.templates import TrackingPerson, PreprocessedPerson
-from config_loader import EntranceConfig
+from io_config_loader import IOConfig
 from publisher import Publisher
 
 
@@ -24,7 +24,7 @@ class EntranceDetector:
     """Детектор входа и выхода людей в секторе"""
 
     def __init__(self, frame_shape: np.array, frame_dtype, roi: np.array):
-        config_ = EntranceConfig()
+        config_ = IOConfig('config_io.yml')
         # движущийся объект должен занимать часть ROI
         area_threshold = Polygon(roi).area * config_.get('ENTRANCE_DETECTOR', 'ROI', 'MOVING_ROI_PART')
         self.bg_subtractor = BackgroundSubtractor(
@@ -56,21 +56,20 @@ class EntranceDetector:
     @staticmethod
     def __set_yolo_model(yolo_model) -> YOLO:
         """
-        Выполняет проверку на то, загружена ли модель и, если нет, подгружает и возвращает
+        Выполняет проверку путей и наличие модели:
+            Если директория отсутствует, создает ее, а также скачивает в нее необходимую модель
         Parameters:
             yolo_model: n (nano), m (medium)...
         Returns:
-            YOLO модель
+            Объект YOLO-pose
         """
-        model = os.path.join(
-            Path(__file__).resolve().parents[1], 'models', 'yolo_models', f'yolov8{yolo_model}-pose.onnx')
-        if not os.path.exists(model):
-            yolo_pose = YOLO(f'yolov8{yolo_model}-pose').export(format='onnx')
-            shutil.move(f'yolov8{yolo_model}-pose.onnx', model)
-            os.remove(f'yolov8{yolo_model}-pose.pt')
-        else:
-            yolo_pose = YOLO(model)
-        return yolo_pose
+        yolo_models_path = os.path.join(Path(__file__).resolve().parents[2], 'resources', 'models', 'yolo_models')
+        if not os.path.exists(yolo_models_path):
+            Path(yolo_models_path).mkdir(parents=True, exist_ok=True)
+        model_path = os.path.join(yolo_models_path, f'yolov8{yolo_model}-pose')
+        if not os.path.exists(f'{model_path}.onnx'):
+            YOLO(model_path).export(format='onnx')
+        return YOLO(f'{model_path}.onnx')
 
     @staticmethod
     def __inflate_polygon(polygon_points: np.array, scale_multiplier: float) -> np.array:

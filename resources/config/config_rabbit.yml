@@ -1,0 +1,5 @@
+DEBUG_ENTRANCE:
+  HOST: "amqp://tarasqua:14021993@localhost:5672/"
+  TOPIC_EXCHANGE_NAME: "debug_entrance"
+  QUEUE_NAME: "debug_entrance"
+  ROUTING_KEY: "debug"
