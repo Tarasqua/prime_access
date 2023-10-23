@@ -62,3 +62,18 @@ class PreprocessedPerson(BaseModel):
     right_shoulder: deque = deque(maxlen=25)
     has_entered: bool = True
     detection_time: datetime.datetime = datetime.datetime.now()
+
+
+class ClassifiedPerson(BaseModel):
+    """
+    Структура данных для человека, прошедшего классфикацию
+    Parameters:
+        person_id: уникальный id;
+        classification: ФИО работника (возможно, id);
+        has_entered: вошел человек или нет;
+        detection_time: время обнаружения.
+    """
+    person_id: UUID = Field(default_factory=uuid4)
+    classification: str = ""
+    has_entered: bool = True
+    detection_time: datetime.datetime = datetime.datetime.now()
